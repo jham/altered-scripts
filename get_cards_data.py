@@ -1,7 +1,7 @@
 # Script by Maverick CHARDET
 # MIT License
 
-# Parameters
+# Default config values. Put local changes in config.toml
 LANGUAGES = ["en", "fr", "es", "it", "de"]
 DUMP_TEMP_FILES = False
 OUTPUT_FOLDER = "results"
@@ -12,27 +12,30 @@ INCLUDE_KS = True
 FORCE_INCLUDE_KS_UNIQUES = False # only relevant if INCLUDE_KS = False and INCLUDE_UNIQUES = True
 INCLUDE_FOILERS = False
 SKIP_NOT_ALL_LANGUAGES = False
-COLLECTION_TOKEN=None
+ONLY_LOAD_COLLECTION = True
+FACTIONS = ["AX", "BR", "LY", "MU", "OR", "YZ", "NE"]
 
 # Imports
 import requests
+import tomllib
 from typing import Dict, List
-from os.path import join
+from os.path import join, exists
 from utils import dump_json, create_folder_if_not_exists, LANGUAGE_HEADERS
 
 # Constants
 ITEMS_PER_PAGE = 36
 
-def get_page(apiEndpoint, language, page, faction=None, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None):
-    rarity_params = "rarity[]=UNIQUE&rarity[]=COMMON&rarity[]=RARE"
+def get_page(apiEndpoint, language, page, faction=None, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
+    rarity_params = ""
     if not include_uniques:
-        rarity_params = "rarity[]=COMMON&rarity[]=RARE"
-    url = f"https://api.altered.gg/{apiEndpoint}?{rarity_params}&itemsPerPage={items_per_page}&page={page}"
+        rarity_params = "&rarity[]=COMMON&rarity[]=RARE"
+    url = f"https://api.altered.gg/{apiEndpoint}?itemsPerPage={items_per_page}&page={page}{rarity_params}"
     headers = {}
     headers.update(LANGUAGE_HEADERS[language])
     if collection_token:
         headers.update({"Authorization": collection_token})
-        url += f"&collection=true"
+        if only_load_collection:
+            url += f"&collection=true"
     if faction is not None:
         url += f"&factions[]={faction}"
     attempts = 0
@@ -69,18 +72,18 @@ def fix_api_errors(cards):
         if id.startswith("ALT_COREKS_B_LY_10_"): # Ouroboros Inkcaster KS
             card["collectorNumberFormatted"] = cn.replace("BTG-065", "BTG-074")
 
-def get_data_language_faction(apiEndpoint, language, faction, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None):
+def get_data_language_faction(apiEndpoint, language, faction, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
     print("  page 1")
-    data, page1_total = get_page(apiEndpoint, language, 1, faction=faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token)
+    data, page1_total = get_page(apiEndpoint, language, 1, faction=faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
     if data is None:
         return None
     nb_pages = (page1_total - 1)//ITEMS_PER_PAGE + 1
     for i in range(2, nb_pages+1):
         print(f"  page {i}/{nb_pages}")
-        page_data, page_total = get_page(apiEndpoint, language, i, faction=faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token)
+        page_data, page_total = get_page(apiEndpoint, language, i, faction=faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
         if page_total != page1_total:
             print("Restarting because the total number of cards changed")
-            return get_data_language_faction(language, faction, collection_token=collection_token)
+            return get_data_language_faction(language, faction, collection_token=collection_token, only_load_collection=only_load_collection)
         data += page_data
     
     if len(data) != page1_total:
@@ -88,12 +91,15 @@ def get_data_language_faction(apiEndpoint, language, faction, include_uniques=IN
     
     return data
 
-def get_data_language(apiEndpoint, language, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None):
+def get_data_language(apiEndpoint, factions, language, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
     data = []
-    for faction in ["AX", "BR", "LY", "MU", "OR", "YZ", "NE"]:
-        print(f"==== Faction {faction} ====")
-        data += get_data_language_faction(apiEndpoint, language, faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token)
-    return data
+    if factions:
+        for faction in factions:
+            print(f"==== Faction {faction} ====")
+            data += get_data_language_faction(apiEndpoint, language, faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token,only_load_collection=only_load_collection)
+        return data
+    else:
+        return get_data_language_faction(apiEndpoint, language, None, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token,only_load_collection=only_load_collection)
 
 def treat_cards_data(cards_data, stats_data, include_uniques, include_ks, include_promo_cards, include_foilers, force_include_ks_uniques):
     cards = []
@@ -218,7 +224,9 @@ def get_cards_data(
     include_foilers=INCLUDE_FOILERS,
     force_include_ks_uniques=FORCE_INCLUDE_KS_UNIQUES,
     items_per_page=ITEMS_PER_PAGE,
-    collection_token=COLLECTION_TOKEN
+    factions=FACTIONS,
+    collection_token=None,
+    only_load_collection=ONLY_LOAD_COLLECTION
 ):
     if dump_temp_files:
         create_folder_if_not_exists(temp_folder)
@@ -233,13 +241,13 @@ def get_cards_data(
     raw_stats_data = []
     if collection_token:
         print("Importing stats data")
-        raw_stats_data = get_data_language("cards/stats", "en", include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token)
+        raw_stats_data = get_data_language("cards/stats", factions, "en", include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
         if dump_temp_files:
             dump_json(raw_cards_data, join(temp_folder, 'raw_stats_data_' + language + '.json'))
 
     for language in languages:
         print("Importing card data for language " + language)
-        raw_cards_data = get_data_language("cards", language, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token)
+        raw_cards_data = get_data_language("cards", factions, language, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
         if dump_temp_files:
             dump_json(raw_cards_data, join(temp_folder, 'raw_cards_data_' + language + '.json'))
         tcards, ttypes, tsubtypes, tfactions, trarities = treat_cards_data(
@@ -271,7 +279,32 @@ def get_cards_data(
     return cards, types, subtypes, factions, rarities
 
 if __name__ == "__main__":
-    cards, types, subtypes, factions, rarities = get_cards_data()
+    data = {}
+    if exists("config.toml"):
+        with open("config.toml", "rb") as f:
+            data = tomllib.load(f)
+    print(f"Config: {data}")
+
+    collection_token = None
+    if exists("secret_token.txt"):
+        with open ("secret_token.txt", "r") as f:
+            collection_token = f.read()
+
+    cards, types, subtypes, factions, rarities = get_cards_data(
+        languages = data.get("languages", LANGUAGES),
+        dump_temp_files = data.get("dump_temp_files", DUMP_TEMP_FILES),
+        temp_folder = data.get("temp_folder", TEMP_FOLDER),
+        skip_not_all_languages = data.get("skip_not_all_languages", SKIP_NOT_ALL_LANGUAGES),
+        include_uniques = data.get("include_uniques", INCLUDE_UNIQUES),
+        include_ks = data.get("include_kickstarter", INCLUDE_KS),
+        include_promo_cards = data.get("include_promo_cards", INCLUDE_PROMO_CARDS),
+        include_foilers = data.get("include_foilers", INCLUDE_FOILERS),
+        force_include_ks_uniques = data.get("force_include_ks_uniques", FORCE_INCLUDE_KS_UNIQUES),
+        items_per_page = data.get("items_per_page", ITEMS_PER_PAGE),
+        factions = data.get("factions", FACTIONS),
+        collection_token = collection_token,
+        only_load_collection = data.get("only_load_collection", ONLY_LOAD_COLLECTION),
+    )
     create_folder_if_not_exists(OUTPUT_FOLDER)
     dump_json(cards,    join(OUTPUT_FOLDER, 'cards.json'))
     dump_json(types,    join(OUTPUT_FOLDER, 'types.json'))
