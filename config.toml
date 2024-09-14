@@ -1,0 +1,38 @@
+# Controls for what cards to include
+include_promo_cards = true
+include_uniques = true
+include_ks = true
+include_foilers = false
+
+output_html_data = true
+
+# only relevant if include_ks = false and include_uniques = true
+force_include_ks_uniques = false
+
+# If an auth key is stored in secret_key.txt, this controls
+# what is loaded.
+#  - false: loads all known cards stats for the cards you own 
+#  - true: loads only data for cards you own
+only_load_collection = true
+
+# Array of language codes, available languages are "en", "fr", "es", "it", "de"
+languages = ["en"]
+skip_not_all_languages = false
+
+# Array of faction codes.
+# AX for Axiom
+# BR for Bravos
+# LY for Lyra
+# MU for Muna
+# OR for Ordis
+# YZ for Yzmir
+# NE for Neutral
+# Or an empty array for all factions
+factions = []
+
+# The directory where the result files will be written
+output_folder = "results"
+
+# Controls dumping the intermediate unprocessed data
+dump_temp_files = false
+temp_folder = "temp"

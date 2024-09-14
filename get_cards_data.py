@@ -16,6 +16,7 @@ ONLY_LOAD_COLLECTION = True
 FACTIONS = ["AX", "BR", "LY", "MU", "OR", "YZ", "NE"]
 
 # Imports
+import json
 import requests
 import tomllib
 from typing import Dict, List
@@ -26,7 +27,7 @@ from utils import dump_json, create_folder_if_not_exists, LANGUAGE_HEADERS
 ITEMS_PER_PAGE = 36
 
 def get_page(apiEndpoint, language, page, faction=None, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
-    rarity_params = ""
+    rarity_params = "&rarity[]=COMMON&rarity[]=RARE&rarity[]=UNIQUE"
     if not include_uniques:
         rarity_params = "&rarity[]=COMMON&rarity[]=RARE"
     url = f"https://api.altered.gg/{apiEndpoint}?itemsPerPage={items_per_page}&page={page}{rarity_params}"
@@ -279,11 +280,10 @@ def get_cards_data(
     return cards, types, subtypes, factions, rarities
 
 if __name__ == "__main__":
-    data = {}
+    config = {}
     if exists("config.toml"):
         with open("config.toml", "rb") as f:
-            data = tomllib.load(f)
-    print(f"Config: {data}")
+            config = tomllib.load(f)
 
     collection_token = None
     if exists("secret_token.txt"):
@@ -291,19 +291,19 @@ if __name__ == "__main__":
             collection_token = f.read()
 
     cards, types, subtypes, factions, rarities = get_cards_data(
-        languages = data.get("languages", LANGUAGES),
-        dump_temp_files = data.get("dump_temp_files", DUMP_TEMP_FILES),
-        temp_folder = data.get("temp_folder", TEMP_FOLDER),
-        skip_not_all_languages = data.get("skip_not_all_languages", SKIP_NOT_ALL_LANGUAGES),
-        include_uniques = data.get("include_uniques", INCLUDE_UNIQUES),
-        include_ks = data.get("include_kickstarter", INCLUDE_KS),
-        include_promo_cards = data.get("include_promo_cards", INCLUDE_PROMO_CARDS),
-        include_foilers = data.get("include_foilers", INCLUDE_FOILERS),
-        force_include_ks_uniques = data.get("force_include_ks_uniques", FORCE_INCLUDE_KS_UNIQUES),
-        items_per_page = data.get("items_per_page", ITEMS_PER_PAGE),
-        factions = data.get("factions", FACTIONS),
+        languages = config.get("languages", LANGUAGES),
+        dump_temp_files = config.get("dump_temp_files", DUMP_TEMP_FILES),
+        temp_folder = config.get("temp_folder", TEMP_FOLDER),
+        skip_not_all_languages = config.get("skip_not_all_languages", SKIP_NOT_ALL_LANGUAGES),
+        include_uniques = config.get("include_uniques", INCLUDE_UNIQUES),
+        include_ks = config.get("include_kickstarter", INCLUDE_KS),
+        include_promo_cards = config.get("include_promo_cards", INCLUDE_PROMO_CARDS),
+        include_foilers = config.get("include_foilers", INCLUDE_FOILERS),
+        force_include_ks_uniques = config.get("force_include_ks_uniques", FORCE_INCLUDE_KS_UNIQUES),
+        items_per_page = config.get("items_per_page", ITEMS_PER_PAGE),
+        factions = config.get("factions", FACTIONS),
         collection_token = collection_token,
-        only_load_collection = data.get("only_load_collection", ONLY_LOAD_COLLECTION),
+        only_load_collection = config.get("only_load_collection", ONLY_LOAD_COLLECTION),
     )
     create_folder_if_not_exists(OUTPUT_FOLDER)
     dump_json(cards,    join(OUTPUT_FOLDER, 'cards.json'))
@@ -311,3 +311,23 @@ if __name__ == "__main__":
     dump_json(subtypes, join(OUTPUT_FOLDER, 'subtypes.json'))
     dump_json(factions, join(OUTPUT_FOLDER, 'factions.json'))
     dump_json(rarities, join(OUTPUT_FOLDER, 'rarities.json'))
+
+    if config.get("output_html_data", False):
+        with open("html/assets/cards.js", "w", encoding="utf8") as f:
+            # Sanitize effects that have esacped double quotes
+            for card in cards.values():
+                if card.get("elements") is not None:
+                    if card.get("elements").get("MAIN_EFFECT") is not None:
+                        sanitized_effects = {}
+                        for lang, effect in card["elements"]["MAIN_EFFECT"].items():
+                            sanitized_effects[lang] = effect.replace('\"', "'")
+                        card["elements"]["MAIN_EFFECT"] = sanitized_effects
+                    if card.get("elements").get("RECALL_EFFECT") is not None:
+                        sanitized_effects = {}
+                        for lang, effect in card["elements"]["RECALL_EFFECT"].items():
+                            sanitized_effects[lang] = effect.replace('\"', "'")
+                        card["elements"]["RECALL_EFFECT"] = sanitized_effects
+            # Write out a javascript file so it can be loaded locally in Chrome
+            f.write("var cards = JSON.parse(`")
+            json.dump(cards, f, indent=2, ensure_ascii=False)
+            f.write("`)")
