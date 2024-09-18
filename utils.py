@@ -1,22 +1,12 @@
 # Script by Maverick CHARDET
 # CC-BY
 
-LANGUAGE_HEADERS = {
-    "en": {
-        "Accept-Language": "en-en"
-    },
-    "fr": {
-        "Accept-Language": "fr-fr"
-    },
-    "es": {
-        "Accept-Language": "es-es"
-    },
-    "it": {
-        "Accept-Language": "it-it"
-    },
-    "de": {
-        "Accept-Language": "de-de"
-    }
+LANGUAGE_TO_LOCALE = {
+    "en": "en-us",
+    "fr": "fr-fr",
+    "es": "es-es",
+    "it": "it-it",
+    "de": "de-de",
 }
 
 # Imports

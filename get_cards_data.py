@@ -2,7 +2,6 @@
 # MIT License
 
 # Default config values. Put local changes in config.toml
-LANGUAGES = ["en", "fr", "es", "it", "de"]
 DUMP_TEMP_FILES = False
 OUTPUT_FOLDER = "results"
 TEMP_FOLDER = "temp"
@@ -13,7 +12,6 @@ FORCE_INCLUDE_KS_UNIQUES = False # only relevant if INCLUDE_KS = False and INCLU
 INCLUDE_FOILERS = False
 SKIP_NOT_ALL_LANGUAGES = False
 ONLY_LOAD_COLLECTION = True
-FACTIONS = ["AX", "BR", "LY", "MU", "OR", "YZ", "NE"]
 
 # Imports
 import json
@@ -21,18 +19,19 @@ import requests
 import tomllib
 from typing import Dict, List
 from os.path import join, exists
-from utils import dump_json, create_folder_if_not_exists, LANGUAGE_HEADERS
+from utils import dump_json, create_folder_if_not_exists, LANGUAGE_TO_LOCALE
 
 # Constants
-ITEMS_PER_PAGE = 36
+DEFAULT_ITEMS_PER_PAGE = 36
+ALL_LANGUAGES = ["en", "fr", "es", "it", "de"]
+ALL_FACTIONS = ["AX", "BR", "LY", "MU", "OR", "YZ", "NE"]
 
-def get_page(apiEndpoint, language, page, faction=None, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
-    rarity_params = "&rarity[]=COMMON&rarity[]=RARE&rarity[]=UNIQUE"
-    if not include_uniques:
-        rarity_params = "&rarity[]=COMMON&rarity[]=RARE"
-    url = f"https://api.altered.gg/{apiEndpoint}?itemsPerPage={items_per_page}&page={page}{rarity_params}"
+def get_page(apiEndpoint, language, page, faction=None, rarities=[], items_per_page=DEFAULT_ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
+    url = f"https://api.altered.gg/{apiEndpoint}?itemsPerPage={items_per_page}&page={page}"
+    for rarity in rarities:
+        url += "&rarity[]=" + rarity
     headers = {}
-    headers.update(LANGUAGE_HEADERS[language])
+    url += f"&locale={LANGUAGE_TO_LOCALE[language]}"
     if collection_token:
         headers.update({"Authorization": collection_token})
         if only_load_collection:
@@ -73,15 +72,15 @@ def fix_api_errors(cards):
         if id.startswith("ALT_COREKS_B_LY_10_"): # Ouroboros Inkcaster KS
             card["collectorNumberFormatted"] = cn.replace("BTG-065", "BTG-074")
 
-def get_data_language_faction(apiEndpoint, language, faction, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
+def get_data_language_faction(apiEndpoint, language, faction, rarities=[], items_per_page=DEFAULT_ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
     print("  page 1")
-    data, page1_total = get_page(apiEndpoint, language, 1, faction=faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
+    data, page1_total = get_page(apiEndpoint, language, 1, faction=faction, rarities=rarities, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
     if data is None:
         return None
-    nb_pages = (page1_total - 1)//ITEMS_PER_PAGE + 1
+    nb_pages = (page1_total - 1)//DEFAULT_ITEMS_PER_PAGE + 1
     for i in range(2, nb_pages+1):
         print(f"  page {i}/{nb_pages}")
-        page_data, page_total = get_page(apiEndpoint, language, i, faction=faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
+        page_data, page_total = get_page(apiEndpoint, language, i, faction=faction, rarities=rarities, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
         if page_total != page1_total:
             print("Restarting because the total number of cards changed")
             return get_data_language_faction(language, faction, collection_token=collection_token, only_load_collection=only_load_collection)
@@ -92,15 +91,15 @@ def get_data_language_faction(apiEndpoint, language, faction, include_uniques=IN
     
     return data
 
-def get_data_language(apiEndpoint, factions, language, include_uniques=INCLUDE_UNIQUES, items_per_page=ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
+def get_data_language(apiEndpoint, factions, language, rarities=[], items_per_page=DEFAULT_ITEMS_PER_PAGE, collection_token=None, only_load_collection=True):
     data = []
     if factions:
         for faction in factions:
             print(f"==== Faction {faction} ====")
-            data += get_data_language_faction(apiEndpoint, language, faction, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token,only_load_collection=only_load_collection)
+            data += get_data_language_faction(apiEndpoint, language, faction, rarities=rarities, items_per_page=items_per_page, collection_token=collection_token,only_load_collection=only_load_collection)
         return data
     else:
-        return get_data_language_faction(apiEndpoint, language, None, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token,only_load_collection=only_load_collection)
+        return get_data_language_faction(apiEndpoint, language, None, rarities=rarities, items_per_page=items_per_page, collection_token=collection_token,only_load_collection=only_load_collection)
 
 def treat_cards_data(cards_data, stats_data, include_uniques, include_ks, include_promo_cards, include_foilers, force_include_ks_uniques):
     cards = []
@@ -215,18 +214,19 @@ def add_property_or_ensure_identical(card, property_name, property_value):
         card[property_name] = property_value
 
 def get_cards_data(
-    languages=LANGUAGES,
+    languages=ALL_LANGUAGES,
     dump_temp_files=DUMP_TEMP_FILES,
     temp_folder=TEMP_FOLDER,
     skip_not_all_languages=SKIP_NOT_ALL_LANGUAGES,
-    include_uniques=INCLUDE_UNIQUES,
+    rarities=[],
     include_ks=INCLUDE_KS,
     include_promo_cards=INCLUDE_PROMO_CARDS,
     include_foilers=INCLUDE_FOILERS,
     force_include_ks_uniques=FORCE_INCLUDE_KS_UNIQUES,
-    items_per_page=ITEMS_PER_PAGE,
-    factions=FACTIONS,
+    items_per_page=DEFAULT_ITEMS_PER_PAGE,
+    factions=ALL_FACTIONS,
     collection_token=None,
+    include_stats=False,
     only_load_collection=ONLY_LOAD_COLLECTION
 ):
     if dump_temp_files:
@@ -238,17 +238,21 @@ def get_cards_data(
     treated_factions = {}
     treated_rarities = {}
 
+    include_uniques = False
+    if not rarities or "UNIQUE" in rarities:
+        include_uniques = True
+
     # Collection stats are not language specific, so only load them once, if there is a collection
     raw_stats_data = []
-    if collection_token:
+    if collection_token and include_stats:
         print("Importing stats data")
-        raw_stats_data = get_data_language("cards/stats", factions, "en", include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
+        raw_stats_data = get_data_language("cards/stats", factions, "en", rarities=rarities, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
         if dump_temp_files:
             dump_json(raw_cards_data, join(temp_folder, 'raw_stats_data_' + language + '.json'))
 
     for language in languages:
         print("Importing card data for language " + language)
-        raw_cards_data = get_data_language("cards", factions, language, include_uniques=include_uniques, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
+        raw_cards_data = get_data_language("cards", factions, language, rarities=rarities, items_per_page=items_per_page, collection_token=collection_token, only_load_collection=only_load_collection)
         if dump_temp_files:
             dump_json(raw_cards_data, join(temp_folder, 'raw_cards_data_' + language + '.json'))
         tcards, ttypes, tsubtypes, tfactions, trarities = treat_cards_data(
@@ -272,7 +276,7 @@ def get_cards_data(
         treated_factions[language] = tfactions
         treated_rarities[language] = trarities
 
-    cards    = merge_cards_data(treated_cards, skip_not_all_languages=skip_not_all_languages, is_collection=bool(collection_token))
+    cards    = merge_cards_data(treated_cards, skip_not_all_languages=skip_not_all_languages, is_collection=include_stats)
     types    = merge_language_dicts(treated_types)
     subtypes = merge_language_dicts(treated_subtypes)
     factions = merge_language_dicts(treated_factions)
@@ -291,7 +295,7 @@ if __name__ == "__main__":
             collection_token = f.read()
 
     cards, types, subtypes, factions, rarities = get_cards_data(
-        languages = config.get("languages", LANGUAGES),
+        languages = config.get("languages", ALL_LANGUAGES),
         dump_temp_files = config.get("dump_temp_files", DUMP_TEMP_FILES),
         temp_folder = config.get("temp_folder", TEMP_FOLDER),
         skip_not_all_languages = config.get("skip_not_all_languages", SKIP_NOT_ALL_LANGUAGES),
@@ -300,9 +304,10 @@ if __name__ == "__main__":
         include_promo_cards = config.get("include_promo_cards", INCLUDE_PROMO_CARDS),
         include_foilers = config.get("include_foilers", INCLUDE_FOILERS),
         force_include_ks_uniques = config.get("force_include_ks_uniques", FORCE_INCLUDE_KS_UNIQUES),
-        items_per_page = config.get("items_per_page", ITEMS_PER_PAGE),
-        factions = config.get("factions", FACTIONS),
+        items_per_page = config.get("items_per_page", DEFAULT_ITEMS_PER_PAGE),
+        factions = config.get("factions", ALL_FACTIONS),
         collection_token = collection_token,
+        include_stats = collection_token is not None,
         only_load_collection = config.get("only_load_collection", ONLY_LOAD_COLLECTION),
     )
     create_folder_if_not_exists(OUTPUT_FOLDER)
@@ -312,22 +317,3 @@ if __name__ == "__main__":
     dump_json(factions, join(OUTPUT_FOLDER, 'factions.json'))
     dump_json(rarities, join(OUTPUT_FOLDER, 'rarities.json'))
 
-    if config.get("output_html_data", False):
-        with open("html/assets/cards.js", "w", encoding="utf8") as f:
-            # Sanitize effects that have esacped double quotes
-            for card in cards.values():
-                if card.get("elements") is not None:
-                    if card.get("elements").get("MAIN_EFFECT") is not None:
-                        sanitized_effects = {}
-                        for lang, effect in card["elements"]["MAIN_EFFECT"].items():
-                            sanitized_effects[lang] = effect.replace('\"', "'")
-                        card["elements"]["MAIN_EFFECT"] = sanitized_effects
-                    if card.get("elements").get("RECALL_EFFECT") is not None:
-                        sanitized_effects = {}
-                        for lang, effect in card["elements"]["RECALL_EFFECT"].items():
-                            sanitized_effects[lang] = effect.replace('\"', "'")
-                        card["elements"]["RECALL_EFFECT"] = sanitized_effects
-            # Write out a javascript file so it can be loaded locally in Chrome
-            f.write("var cards = JSON.parse(`")
-            json.dump(cards, f, indent=2, ensure_ascii=False)
-            f.write("`)")
